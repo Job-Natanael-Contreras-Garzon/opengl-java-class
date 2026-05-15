@@ -423,7 +423,8 @@ public class AppFlappyBird {
         }
 
         // Dibujar pajaro.
-        dibujarRect(BIRD_X, birdY, BIRD_ANCHO, BIRD_ALTO, 0.98f, 0.85f, 0.20f);
+        float tiempoAnim = (started && !gameOver) ? (float) GLFW.glfwGetTime() : 0f;
+        dibujarPajaro(BIRD_X, birdY, tiempoAnim);
 
         // Overlay simple de game over (sin texto en framebuffer).
         if (gameOver) {
@@ -441,6 +442,72 @@ public class AppFlappyBird {
         GL20.glUniform3f(uColorLocation, r, g, b);
         // Dibujar 2 triangulos.
         GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 6);
+    }
+
+    /**
+     * Dibuja un pajarito estilo Flappy Bird compuesto por primitivas rectangulares.
+     * Se construye en capas (de atrás hacia adelante):
+     *   1. Ala trasera
+     *   2. Cuerpo
+     *   3. Panza (color claro)
+     *   4. Ala delantera (animada con el tiempo)
+     *   5. Cabeza
+     *   6. Ojo (blanco + pupila)
+     *   7. Pico
+     *   8. Plumas de la cola
+     *   9. Mejilla (detalle de color)
+     *
+     * @param x      Centro horizontal del pájaro en NDC.
+     * @param y      Centro vertical del pájaro en NDC.
+     * @param tiempo Tiempo actual de GLFW (para animar el ala).
+     */
+    private void dibujarPajaro(float x, float y, float tiempo) {
+
+        // ─── Escala base del pájaro (ajusta a gusto) ─────────────────────────
+        float W = BIRD_ANCHO;   // 0.10f
+        float H = BIRD_ALTO;    // 0.10f
+
+        // ─── 1. COLA (detrás de todo) ─────────────────────────────────────────
+        // Tres rectángulos pequeños escalonados simulando plumas
+        dibujarRect(x - W * 1.05f, y + H * 0.18f, W * 0.45f, H * 0.22f,  0.90f, 0.55f, 0.05f);
+        dibujarRect(x - W * 1.10f, y,              W * 0.45f, H * 0.22f,  0.85f, 0.48f, 0.04f);
+        dibujarRect(x - W * 1.05f, y - H * 0.18f, W * 0.45f, H * 0.22f,  0.80f, 0.42f, 0.04f);
+
+        // ─── 2. ALA TRASERA ───────────────────────────────────────────────────
+        // Offset vertical animado con seno (aleteo suave)
+        float aleteo = (float) Math.sin(tiempo * 8.0f) * H * 0.20f;
+        dibujarRect(x - W * 0.15f, y - H * 0.30f + aleteo, W * 0.80f, H * 0.30f, 0.88f, 0.58f, 0.06f);
+
+        // ─── 3. CUERPO PRINCIPAL ──────────────────────────────────────────────
+        dibujarRect(x, y, W, H, 0.98f, 0.78f, 0.10f);   // amarillo dorado
+
+        // ─── 4. PANZA (óvalo claro en el centro-derecha) ─────────────────────
+        dibujarRect(x + W * 0.10f, y - H * 0.05f, W * 0.55f, H * 0.58f, 0.99f, 0.94f, 0.55f);
+
+        // ─── 5. ALA DELANTERA (encima del cuerpo, también aletea) ────────────
+        dibujarRect(x - W * 0.10f, y + H * 0.22f + aleteo * 0.7f, W * 0.70f, H * 0.26f, 0.95f, 0.68f, 0.08f);
+
+        // ─── 6. CABEZA ────────────────────────────────────────────────────────
+        dibujarRect(x + W * 0.28f, y + H * 0.42f, W * 0.75f, H * 0.70f, 0.98f, 0.78f, 0.10f);
+
+        // ─── 7. OJO — blanco + pupila + brillo ───────────────────────────────
+        // Esclerótica (blanco)
+        dibujarRect(x + W * 0.42f, y + H * 0.52f, W * 0.28f, H * 0.28f, 1.00f, 1.00f, 1.00f);
+        // Pupila (negro/azul oscuro)
+        dibujarRect(x + W * 0.48f, y + H * 0.50f, W * 0.15f, H * 0.18f, 0.08f, 0.08f, 0.18f);
+        // Brillo
+        dibujarRect(x + W * 0.46f, y + H * 0.56f, W * 0.07f, H * 0.07f, 1.00f, 1.00f, 1.00f);
+
+        // ─── 8. MEJILLA (detalle expresivo) ──────────────────────────────────
+        // Nota: OpenGL sin blending no tiene transparencia; usamos un color
+        // naranja suave que se mezcla visualmente bien sobre el amarillo.
+        dibujarRect(x + W * 0.38f, y + H * 0.35f, W * 0.22f, H * 0.14f, 1.00f, 0.50f, 0.40f);
+
+        // ─── 9. PICO ──────────────────────────────────────────────────────────
+        // Mandíbula superior (más gruesa)
+        dibujarRect(x + W * 0.72f, y + H * 0.44f, W * 0.38f, H * 0.18f, 1.00f, 0.42f, 0.10f);
+        // Mandíbula inferior (más delgada, ligeramente más abajo)
+        dibujarRect(x + W * 0.68f, y + H * 0.30f, W * 0.32f, H * 0.13f, 0.90f, 0.35f, 0.08f);
     }
 
     // Actualiza feedback visual en barra de titulo.
