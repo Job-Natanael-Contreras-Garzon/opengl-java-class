@@ -48,8 +48,19 @@ public class AppFlappyBird {
     // Parametros de tuberias.
     private static final float TUBERIA_ANCHO = 0.18f;
     private static final float GAP_ALTO = 0.48f;
-    private static final float VELOCIDAD_TUBERIAS = 0.62f;
-    private static final float TIEMPO_ENTRE_TUBERIAS = 1.5f;
+    
+    // Dificultad base
+    private static final float VELOCIDAD_TUBERIAS_BASE = 0.62f;
+    private static final float TIEMPO_ENTRE_TUBERIAS_BASE = 1.5f;
+    
+    // Limites de dificultad (para que siga siendo jugable)
+    private static final float VELOCIDAD_TUBERIAS_MAX = 1.40f;
+    private static final float TIEMPO_ENTRE_TUBERIAS_MIN = 0.60f;
+    
+    // Factor de incremento: cuanto aumenta la velocidad por cada punto acumulado
+    private static final float INCREMENTO_VELOCIDAD_POR_PUNTO = 0.04f;
+    private static final float REDUCCION_TIEMPO_POR_PUNTO = 0.03f;
+    
     private static final float GAP_MIN_CENTRO = -0.45f;
     private static final float GAP_MAX_CENTRO = 0.45f;
 
@@ -78,6 +89,11 @@ public class AppFlappyBird {
     private final List<Tuberia> tuberias = new ArrayList<>();
     // RNG para variar la posicion del gap.
     private final Random random = new Random();
+    
+    // Estado de dificultad actual
+    private float velocidadTuberiasActual;
+    private float tiempoEntreTuberiasActual;
+    private int nivelActual;
 
     /**
      * Modelo de una tuberia:
@@ -258,6 +274,12 @@ public class AppFlappyBird {
         started = false;
         gameOver = false;
         tuberias.clear();
+        
+        // Resetear dificultad a valores base
+        velocidadTuberiasActual = VELOCIDAD_TUBERIAS_BASE;
+        tiempoEntreTuberiasActual = TIEMPO_ENTRE_TUBERIAS_BASE;
+        nivelActual = 1;
+        
         actualizarTitulo();
     }
 
@@ -326,7 +348,7 @@ public class AppFlappyBird {
 
         // Temporizador para generar nuevas tuberias.
         timerSpawn += dt;
-        if (timerSpawn >= TIEMPO_ENTRE_TUBERIAS) {
+        if (timerSpawn >= tiempoEntreTuberiasActual) {
             timerSpawn = 0.0f;
             spawnTuberia();
         }
@@ -335,12 +357,13 @@ public class AppFlappyBird {
         while (it.hasNext()) {
             Tuberia t = it.next();
             // Avance horizontal de obstaculos (derecha -> izquierda).
-            t.x -= VELOCIDAD_TUBERIAS * dt;
+            t.x -= velocidadTuberiasActual * dt;
 
             // Puntuar cuando la tuberia ya quedo atras del pajaro.
             if (t.x + (TUBERIA_ANCHO * 0.5f) < BIRD_X && !t.puntuada) {
                 t.puntuada = true;
                 puntaje++;
+                actualizarDificultad();  // Aumentar dificultad al ganar puntos
                 actualizarTitulo();
             }
 
@@ -361,6 +384,26 @@ public class AppFlappyBird {
     private void spawnTuberia() {
         float gapCentro = GAP_MIN_CENTRO + random.nextFloat() * (GAP_MAX_CENTRO - GAP_MIN_CENTRO);
         tuberias.add(new Tuberia(1.2f, gapCentro));
+    }
+
+    /**
+     * Actualiza la dificultad del juego en función del puntaje acumulado.
+     * - Aumenta la velocidad de las tuberías progresivamente.
+     * - Reduce el tiempo entre aparición de tuberías.
+     * - Calcula el nivel actual basado en el puntaje.
+     * - Aplica límites superiores para mantener la jugabilidad.
+     */
+    private void actualizarDificultad() {
+        // Calcular nivel: cada 5 puntos es un nuevo nivel
+        nivelActual = 1 + (puntaje / 5);
+        
+        // Aumentar velocidad proporcionalmente al puntaje
+        float nuevaVelocidad = VELOCIDAD_TUBERIAS_BASE + (puntaje * INCREMENTO_VELOCIDAD_POR_PUNTO);
+        velocidadTuberiasActual = Math.min(nuevaVelocidad, VELOCIDAD_TUBERIAS_MAX);
+        
+        // Reducir tiempo entre tuberías proporcionalmente al puntaje
+        float nuevoTiempo = TIEMPO_ENTRE_TUBERIAS_BASE - (puntaje * REDUCCION_TIEMPO_POR_PUNTO);
+        tiempoEntreTuberiasActual = Math.max(nuevoTiempo, TIEMPO_ENTRE_TUBERIAS_MIN);
     }
 
     /**
@@ -512,13 +555,15 @@ public class AppFlappyBird {
 
     // Actualiza feedback visual en barra de titulo.
     private void actualizarTitulo() {
-        String tituloBase = "Flappy Bird OpenGL | Puntos: " + puntaje;
+        String tituloBase = "Flappy Bird | Puntos: " + puntaje + " | Nivel: " + nivelActual;
+        String dificultadInfo = String.format(" | Vel: %.2f | Frec: %.2fs", velocidadTuberiasActual, tiempoEntreTuberiasActual);
+        
         if (!started) {
-            GLFW.glfwSetWindowTitle(window, tituloBase + " | SPACE para empezar");
+            GLFW.glfwSetWindowTitle(window, tituloBase + dificultadInfo + " | SPACE para empezar");
         } else if (gameOver) {
-            GLFW.glfwSetWindowTitle(window, tituloBase + " | GAME OVER - SPACE o R para reiniciar");
+            GLFW.glfwSetWindowTitle(window, tituloBase + dificultadInfo + " | GAME OVER - SPACE o R para reiniciar");
         } else {
-            GLFW.glfwSetWindowTitle(window, tituloBase);
+            GLFW.glfwSetWindowTitle(window, tituloBase + dificultadInfo);
         }
     }
 
