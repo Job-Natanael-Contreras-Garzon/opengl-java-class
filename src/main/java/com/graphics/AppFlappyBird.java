@@ -22,19 +22,10 @@ import org.lwjgl.opengl.GL30;
  * Jugador 1 → SPACE │ color amarillo/dorado (pato original)
  * Jugador 2 → W o ↑ │ color azul/cian (pato azul)
  *
- * Reglas:
- * - Cada pájaro tiene posición, velocidad, estado y puntaje propios.
- * - Las tuberías son compartidas y avanzan para ambos.
- * - Un pájaro muerto queda "congelado" en su posición final.
- * - El juego termina cuando AMBOS pájaros han chocado.
- * - La partida empieza en cuanto cualquiera de los dos salta por
- * primera vez (para sincronizar el spawning de tuberías).
- * - Al reiniciar (SPACE o W tras game-over) se resetea todo.
- *
- * Arquitectura clave:
- * - Clase interna Bird encapsula todo el estado por jugador.
- * - dibujarPajaro() acepta un Bird + tiempo + paleta de colores.
- * - El título muestra los puntajes de ambos en tiempo real.
+ * Novedades:
+ * - Rotación basada en Vertex Shader (físicas de vuelo visuales).
+ * - Animación de aleteo sincronizada con el input de salto.
+ * - Barra HUD superior con display digital de 7 segmentos.
  * ══════════════════════════════════════════════════════════════════════
  */
 public class AppFlappyBird {
@@ -44,9 +35,7 @@ public class AppFlappyBird {
     private static final int ALTO = 700;
 
     // ── Pájaros ────────────────────────────────────────────────────────
-    /** Posición X horizontal fija del pájaro 1 (izquierda). */
     private static final float BIRD1_X = -0.55f;
-    /** Posición X horizontal fija del pájaro 2 (un poco más a la derecha). */
     private static final float BIRD2_X = -0.30f;
     private static final float BIRD_ANCHO = 0.10f;
     private static final float BIRD_ALTO = 0.10f;
@@ -56,60 +45,57 @@ public class AppFlappyBird {
     private static final float IMPULSO_SALTO = 0.85f;
     private static final float VELOCIDAD_MAX_CAIDA = -1.8f;
 
-    // ── Tuberías ───────────────────────────────────────────────────────
+    // ── Tuberías y Niveles ─────────────────────────────────────────────
     private static final float TUBERIA_ANCHO = 0.18f;
     private static final float GAP_ALTO = 0.48f;
-    private static final float VELOCIDAD_BASE = 0.62f; // velocidad inicial
-    private static final float TIEMPO_BASE = 1.5f; // tiempo inicial entre tuberías
-    private static final float VELOCIDAD_TUBERIAS = VELOCIDAD_BASE; // compat
-    private static final float TIEMPO_ENTRE_TUBERIAS = TIEMPO_BASE; // compat
+    private static final float VELOCIDAD_BASE = 0.62f;
+    private static final float TIEMPO_BASE = 1.5f;
     private static final float GAP_MIN_CENTRO = -0.45f;
     private static final float GAP_MAX_CENTRO = 0.45f;
-
-    // ── Sistema de Niveles (2.3 - Incremento Progresivo) ───────────────
-    /** Cada 5 puntos acumulados = 1 nivel más */
     private static final int PUNTOS_POR_NIVEL = 5;
-    /** Incremento de velocidad por nivel: +0.08 por nivel */
     private static final float INCREMENTO_VELOCIDAD = 0.08f;
-    /** Decremento de tiempo entre tubos por nivel: -0.1s por nivel */
     private static final float DECREMENTO_TIEMPO = 0.1f;
-    /** Velocidad máxima: no puede exceder para mantener jugabilidad */
     private static final float VELOCIDAD_MAX = 1.40f;
-    /** Tiempo mínimo entre tubos: piso inferior */
     private static final float TIEMPO_MIN = 0.8f;
 
     // ── Recursos OpenGL ────────────────────────────────────────────────
     private long window;
     private int programa;
     private int vao, vbo;
+    // Uniforms extendidos para permitir rotación en el shader
     private int uOffsetLocation, uScaleLocation, uColorLocation;
+    private int uAngleLocation, uPivotLocation;
 
-    // ── Estado global ──────────────────────────────────────────────────
+    // ── Estado global del Render (Máquina de estados para dibujo) ──────
+    private float estadoAngulo = 0f;
+    private float estadoPivotX = 0f;
+    private float estadoPivotY = 0f;
+
     private float timerSpawn;
-    private boolean started; // true en cuanto cualquier pájaro salta
-    private boolean gameOver; // true cuando AMBOS pájaros han muerto
-    private int maxPuntajeGlobal; // máximo puntaje alcanzado (para calcular nivel)
+    private boolean started;
+    private boolean gameOver;
+    private int maxPuntajeGlobal;
 
     private final List<Tuberia> tuberias = new ArrayList<>();
     private final Random random = new Random();
 
-    // ── Jugadores ──────────────────────────────────────────────────────
+    // ── Jugadores y Teclado ────────────────────────────────────────────
     private Bird bird1;
     private Bird bird2;
-
-    // ── Teclado (detección de flanco) ──────────────────────────────────
     private boolean prevSpace, prevW, prevUp, prevR;
 
     // ══════════════════════════════════════════════════════════════════
-    // Clase interna Bird — encapsula el estado completo de un jugador
+    // Clase interna Bird
     // ══════════════════════════════════════════════════════════════════
     private static class Bird {
-        final float birdX; // posición X fija en NDC
+        float birdX; // ¡QUITAMOS EL 'final' AQUÍ!
+        final float startX; // NUEVO: Guardar posición original para el reset
         float birdY;
         float velY;
         boolean alive;
         int puntaje;
-        // Paleta de colores — tres capas: principal, panza, ala/cola
+        float tiempoAleteo;
+
         final float[] colorCuerpo;
         final float[] colorPanza;
         final float[] colorAla;
@@ -117,6 +103,7 @@ public class AppFlappyBird {
         final String nombre;
 
         Bird(float x, float[] cuerpo, float[] panza, float[] ala, float[] pico, String nombre) {
+            this.startX = x;
             this.birdX = x;
             this.colorCuerpo = cuerpo;
             this.colorPanza = panza;
@@ -126,20 +113,18 @@ public class AppFlappyBird {
         }
 
         void reset() {
+            birdX = startX; // RESTAURAR X
             birdY = 0.0f;
             velY = 0.0f;
             alive = true;
             puntaje = 0;
+            tiempoAleteo = 0f;
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Modelo de tubería
-    // ══════════════════════════════════════════════════════════════════
     private static class Tuberia {
         float x;
         float gapCentroY;
-        // Cada jugador tiene su propio flag para no sumar dos veces.
         boolean puntuada1;
         boolean puntuada2;
 
@@ -159,11 +144,9 @@ public class AppFlappyBird {
         cleanup();
     }
 
-    // ── Inicialización GLFW / OpenGL ───────────────────────────────────
     private void init() {
-        if (!GLFW.glfwInit()) {
+        if (!GLFW.glfwInit())
             throw new IllegalStateException("No se pudo iniciar GLFW");
-        }
 
         GLFW.glfwDefaultWindowHints();
         GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
@@ -186,18 +169,42 @@ public class AppFlappyBird {
         crearQuadBase();
     }
 
-    // ── Shaders (igual que antes) ──────────────────────────────────────
+    // ── Shaders (NUEVO: Lógica de rotación en Vertex Shader) ───────────
     private void crearShaders() {
         String vertexSrc = """
                 #version 330 core
                 layout (location = 0) in vec3 aPos;
+
                 uniform vec2 uOffset;
                 uniform vec2 uScale;
+                uniform float uAngle; // Ángulo de rotación en radianes
+                uniform vec2 uPivot;  // Centro de rotación (coordenada de la pantalla)
+
                 void main() {
-                    vec2 finalPos = aPos.xy * uScale + uOffset;
-                    gl_Position = vec4(finalPos, aPos.z, 1.0);
+                    // 1. Escalar el rectángulo
+                    vec2 pos = aPos.xy * uScale;
+                    // 2. Moverlo a su posición en el mundo
+                    pos += uOffset;
+
+                    // 3. Lógica de Rotación 2D alrededor de un pivote
+                    // Trasladar al origen relativo al pivote
+                    pos -= uPivot;
+
+                    // Aplicar matriz de rotación
+                    float c = cos(uAngle);
+                    float s = sin(uAngle);
+                    vec2 rotPos = vec2(
+                        pos.x * c - pos.y * s,
+                        pos.x * s + pos.y * c
+                    );
+
+                    // Devolver a la posición original
+                    pos = rotPos + uPivot;
+
+                    gl_Position = vec4(pos, aPos.z, 1.0);
                 }
                 """;
+
         String fragmentSrc = """
                 #version 330 core
                 uniform vec3 uColor;
@@ -227,6 +234,8 @@ public class AppFlappyBird {
         uOffsetLocation = GL20.glGetUniformLocation(programa, "uOffset");
         uScaleLocation = GL20.glGetUniformLocation(programa, "uScale");
         uColorLocation = GL20.glGetUniformLocation(programa, "uColor");
+        uAngleLocation = GL20.glGetUniformLocation(programa, "uAngle");
+        uPivotLocation = GL20.glGetUniformLocation(programa, "uPivot");
 
         GL20.glDeleteShader(vs);
         GL20.glDeleteShader(fs);
@@ -237,7 +246,6 @@ public class AppFlappyBird {
             throw new RuntimeException(tipo + ": " + GL20.glGetShaderInfoLog(shader));
     }
 
-    // ── Quad base ─────────────────────────────────────────────────────
     private void crearQuadBase() {
         float[] verts = {
                 -0.5f, -0.5f, 0f, 0.5f, -0.5f, 0f, 0.5f, 0.5f, 0f,
@@ -256,203 +264,155 @@ public class AppFlappyBird {
         GL30.glBindVertexArray(0);
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Reset completo de la partida
-    // ══════════════════════════════════════════════════════════════════
     private void resetGame() {
-        // ── Jugador 1: pato amarillo/dorado ───────────────────────────
-        bird1 = new Bird(
-                BIRD1_X,
-                new float[] { 0.98f, 0.78f, 0.10f }, // cuerpo: amarillo
-                new float[] { 0.99f, 0.94f, 0.55f }, // panza: amarillo claro
-                new float[] { 0.90f, 0.55f, 0.05f }, // ala/cola: naranja
-                new float[] { 1.00f, 0.42f, 0.10f }, // pico: naranja rojo
-                "P1");
+        bird1 = new Bird(BIRD1_X, new float[] { 0.98f, 0.78f, 0.10f }, new float[] { 0.99f, 0.94f, 0.55f },
+                new float[] { 0.90f, 0.55f, 0.05f }, new float[] { 1.00f, 0.42f, 0.10f }, "P1");
         bird1.reset();
 
-        // ── Jugador 2: pato azul/cian ─────────────────────────────────
-        bird2 = new Bird(
-                BIRD2_X,
-                new float[] { 0.15f, 0.65f, 0.95f }, // cuerpo: azul cielo
-                new float[] { 0.70f, 0.90f, 1.00f }, // panza: azul claro
-                new float[] { 0.05f, 0.40f, 0.80f }, // ala/cola: azul oscuro
-                new float[] { 1.00f, 0.42f, 0.10f }, // pico: naranja (igual)
-                "P2");
+        bird2 = new Bird(BIRD2_X, new float[] { 0.15f, 0.65f, 0.95f }, new float[] { 0.70f, 0.90f, 1.00f },
+                new float[] { 0.05f, 0.40f, 0.80f }, new float[] { 1.00f, 0.42f, 0.10f }, "P2");
         bird2.reset();
 
         tuberias.clear();
         timerSpawn = 0f;
         started = false;
         gameOver = false;
-
         actualizarTitulo();
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Input — detección de flanco para ambos jugadores
-    // ══════════════════════════════════════════════════════════════════
     private void procesarInput() {
-        // Salir con ESC siempre
         if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_ESCAPE) == GLFW.GLFW_PRESS)
             GLFW.glfwSetWindowShouldClose(window, true);
 
-        // ── SPACE → Jugador 1 ─────────────────────────────────────────
         boolean spaceAhora = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_SPACE) == GLFW.GLFW_PRESS;
         if (spaceAhora && !prevSpace) {
-            if (gameOver) {
+            if (gameOver)
                 resetGame();
-                saltarBird(bird1);
-            } else {
-                saltarBird(bird1);
-            }
+            saltarBird(bird1);
         }
         prevSpace = spaceAhora;
 
-        // ── W o ↑ → Jugador 2 ────────────────────────────────────────
         boolean wAhora = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_W) == GLFW.GLFW_PRESS;
         boolean upAhora = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_UP) == GLFW.GLFW_PRESS;
         boolean p2Jump = (wAhora && !prevW) || (upAhora && !prevUp);
         if (p2Jump) {
-            if (gameOver) {
+            if (gameOver)
                 resetGame();
-                saltarBird(bird2);
-            } else {
-                saltarBird(bird2);
-            }
+            saltarBird(bird2);
         }
         prevW = wAhora;
         prevUp = upAhora;
 
-        // ── R → reset manual en game over ─────────────────────────────
         boolean rAhora = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
         if (rAhora && !prevR && gameOver)
             resetGame();
         prevR = rAhora;
     }
 
-    /** Aplica impulso al pájaro si está vivo; activa la simulación global. */
     private void saltarBird(Bird b) {
         if (!b.alive)
             return;
         started = true;
         b.velY = IMPULSO_SALTO;
+        // Iniciar el timer de aleteo (0.25 segundos de animación)
+        b.tiempoAleteo = 0.25f;
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Sistema de Niveles Dinámicos (2.3)
-    // ══════════════════════════════════════════════════════════════════
-    /**
-     * Calcula el nivel actual basado en el puntaje máximo alcanzado.
-     * Fórmula: 1 + floor(maxPuntajeGlobal / PUNTOS_POR_NIVEL)
-     * 
-     * Ejemplo:
-     * Puntaje 0-4 → Nivel 1
-     * Puntaje 5-9 → Nivel 2
-     * Puntaje 10+ → Nivel 3, etc.
-     */
     private int calcularNivel() {
         return 1 + (maxPuntajeGlobal / PUNTOS_POR_NIVEL);
     }
 
-    /**
-     * Calcula la velocidad de las tuberías según el nivel actual.
-     * Fórmula: velocidad = min(VELOCIDAD_BASE + (nivel - 1) × INCREMENTO_VELOCIDAD,
-     * VELOCIDAD_MAX)
-     * 
-     * Así se garantiza que no exceda VELOCIDAD_MAX para mantener el juego jugable.
-     */
     private float calcularVelocidadTuberias(int nivel) {
-        float velocidad = VELOCIDAD_BASE + (nivel - 1) * INCREMENTO_VELOCIDAD;
-        return Math.min(velocidad, VELOCIDAD_MAX);
+        return Math.min(VELOCIDAD_BASE + (nivel - 1) * INCREMENTO_VELOCIDAD, VELOCIDAD_MAX);
     }
 
-    /**
-     * Calcula el tiempo entre spawns de tubería según el nivel actual.
-     * Fórmula: tiempo = max(TIEMPO_BASE - (nivel - 1) × DECREMENTO_TIEMPO,
-     * TIEMPO_MIN)
-     * 
-     * A mayor nivel, menor tiempo = aparecen más frecuentemente.
-     * El mínimo TIEMPO_MIN asegura que el juego siga siendo jugable.
-     */
     private float calcularTiempoSpawn(int nivel) {
-        float tiempo = TIEMPO_BASE - (nivel - 1) * DECREMENTO_TIEMPO;
-        return Math.max(tiempo, TIEMPO_MIN);
+        return Math.max(TIEMPO_BASE - (nivel - 1) * DECREMENTO_TIEMPO, TIEMPO_MIN);
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Lógica por frame
-    // ══════════════════════════════════════════════════════════════════
     private void actualizar(float dt) {
-        if (!started || gameOver)
-            return;
+        if (!started) return;
 
-        actualizarBird(bird1, dt);
-        actualizarBird(bird2, dt);
-
-        // ── Obtener nivel actual para escalar dificultad ───────────────
         int nivelActual = calcularNivel();
         float velocidadActual = calcularVelocidadTuberias(nivelActual);
         float tiempoSpawnActual = calcularTiempoSpawn(nivelActual);
 
-        // ── Spawn de tuberías (compartidas) ───────────────────────────
-        timerSpawn += dt;
-        if (timerSpawn >= tiempoSpawnActual) {
-            timerSpawn = 0f;
-            spawnTuberia();
-        }
+        // Si es Game Over, el escenario se detiene, pero aplicamos la velocidad
+        // 0 a los pájaros muertos para que caigan recto.
+        float velocidadEntorno = gameOver ? 0f : velocidadActual;
 
-        // ── Mover tuberías y puntuar / remover ────────────────────────
-        Iterator<Tuberia> it = tuberias.iterator();
-        while (it.hasNext()) {
-            Tuberia t = it.next();
-            t.x -= velocidadActual * dt;
+        // Pasamos la velocidad a actualizarBird
+        actualizarBird(bird1, dt, velocidadEntorno);
+        actualizarBird(bird2, dt, velocidadEntorno);
 
-            // Puntaje independiente por jugador
-            puntarSiCorresponde(t, bird1, true);
-            puntarSiCorresponde(t, bird2, false);
+        if (!gameOver) {
+            // Spawn de tuberías
+            timerSpawn += dt;
+            if (timerSpawn >= tiempoSpawnActual) {
+                timerSpawn = 0f;
+                spawnTuberia();
+            }
 
-            // Remover si salió de pantalla
-            if (t.x + TUBERIA_ANCHO * 0.5f < -1.3f)
-                it.remove();
-        }
+            // Mover tuberías y puntuar
+            Iterator<Tuberia> it = tuberias.iterator();
+            while (it.hasNext()) {
+                Tuberia t = it.next();
+                t.x -= velocidadActual * dt;
 
-        // ── ¿Ambos muertos? ───────────────────────────────────────────
-        if (!bird1.alive && !bird2.alive) {
-            gameOver = true;
-            actualizarTitulo();
+                puntarSiCorresponde(t, bird1, true);
+                puntarSiCorresponde(t, bird2, false);
+
+                if (t.x + TUBERIA_ANCHO * 0.5f < -1.3f) it.remove();
+            }
+
+            // Revisar condición de Game Over
+            if (!bird1.alive && !bird2.alive) {
+                gameOver = true;
+                actualizarTitulo();
+            }
         }
     }
 
-    /** Física + colisión de un único pájaro. */
-    private void actualizarBird(Bird b, float dt) {
-        if (!b.alive)
-            return;
+    private void actualizarBird(Bird b, float dt, float velocidadEntorno) {
+        // ── SI ESTÁ MUERTO: Cae y es arrastrado ──
+        if (!b.alive) {
+            b.birdX -= velocidadEntorno * dt; // Se lo lleva el escenario
+            b.velY += GRAVEDAD * dt * 1.5f;   // Cae más rápido (peso muerto)
+            b.birdY += b.velY * dt;
+            return; // Terminamos aquí para no calcular colisiones otra vez
+        }
 
+        // ── SI ESTÁ VIVO: Físicas normales ──
         b.velY += GRAVEDAD * dt;
-        if (b.velY < VELOCIDAD_MAX_CAIDA)
-            b.velY = VELOCIDAD_MAX_CAIDA;
+        if (b.velY < VELOCIDAD_MAX_CAIDA) b.velY = VELOCIDAD_MAX_CAIDA;
         b.birdY += b.velY * dt;
+        
+        // Descontar timer del aleteo
+        if (b.tiempoAleteo > 0) {
+            b.tiempoAleteo -= dt;
+        }
 
-        // Colisión con límites verticales de la pantalla
         float top = b.birdY + BIRD_ALTO * 0.5f;
         float bottom = b.birdY - BIRD_ALTO * 0.5f;
-        if (top >= 1.0f || bottom <= -1.0f) {
+        
+        // ¡LÍMITE DEL TECHO CORREGIDO! Usa 0.75f para no pisar la barra superior
+        if (top >= 0.75f || bottom <= -1.0f) {
             b.alive = false;
+            b.velY = 0; // Detener salto al chocar
             actualizarTitulo();
             return;
         }
 
-        // Colisión con tuberías
         for (Tuberia t : tuberias) {
             if (colisionaConTuberia(b, t)) {
                 b.alive = false;
+                b.velY = 0; // Detener salto
                 actualizarTitulo();
                 return;
             }
         }
     }
 
-    /** Suma un punto al jugador cuando la tubería queda atrás de su pájaro. */
     private void puntarSiCorresponde(Tuberia t, Bird b, boolean esP1) {
         if (!b.alive)
             return;
@@ -463,11 +423,9 @@ public class AppFlappyBird {
             else
                 t.puntuada2 = true;
             b.puntaje++;
-            // Actualizar máximo puntaje global para calcular el nivel
             int puntajeActual = Math.max(bird1.puntaje, bird2.puntaje);
-            if (puntajeActual > maxPuntajeGlobal) {
+            if (puntajeActual > maxPuntajeGlobal)
                 maxPuntajeGlobal = puntajeActual;
-            }
             actualizarTitulo();
         }
     }
@@ -483,25 +441,19 @@ public class AppFlappyBird {
         float pL = t.x - TUBERIA_ANCHO * 0.5f, pR = t.x + TUBERIA_ANCHO * 0.5f;
 
         if (bR <= pL || bL >= pR)
-            return false; // sin overlap X
-
+            return false;
         float gT = t.gapCentroY + GAP_ALTO * 0.5f;
         float gB = t.gapCentroY - GAP_ALTO * 0.5f;
-        return bT > gT || bB < gB; // fuera del gap
+        return bT > gT || bB < gB;
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Render
-    // ══════════════════════════════════════════════════════════════════
     private void render() {
-        // Fondo: cielo azul claro
         GL11.glClearColor(0.52f, 0.80f, 0.92f, 1.0f);
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
 
         GL20.glUseProgram(programa);
         GL30.glBindVertexArray(vao);
 
-        // ── Tuberías (compartidas, misma lógica de siempre) ───────────
         for (Tuberia t : tuberias) {
             float gTop = t.gapCentroY + GAP_ALTO * 0.5f;
             float gBot = t.gapCentroY - GAP_ALTO * 0.5f;
@@ -515,56 +467,61 @@ public class AppFlappyBird {
                 dibujarRect(t.x, -1.0f + altoInf * 0.5f, TUBERIA_ANCHO, altoInf, 0.18f, 0.70f, 0.25f);
         }
 
-        float tiempo = (float) GLFW.glfwGetTime();
-
-        // ── Pájaros ───────────────────────────────────────────────────
-        // Los muertos se dibujan antes (quedan "debajo" visualmente)
         if (!bird1.alive)
-            dibujarPajaroMuerto(bird1, tiempo);
+            dibujarPajaroMuerto(bird1);
         if (!bird2.alive)
-            dibujarPajaroMuerto(bird2, tiempo);
+            dibujarPajaroMuerto(bird2);
         if (bird1.alive)
-            dibujarPajaro(bird1, tiempo);
+            dibujarPajaro(bird1);
         if (bird2.alive)
-            dibujarPajaro(bird2, tiempo);
+            dibujarPajaro(bird2);
 
-        // ── Panel de puntaje lateral ──────────────────────────────────
-        dibujarPanelPuntaje();
+        dibujarInterfazSuperior();
 
-        // ── Overlay game over ─────────────────────────────────────────
         if (gameOver) {
             dibujarRect(0.0f, 0.0f, 2.0f, 0.22f, 0.10f, 0.12f, 0.15f);
         }
     }
 
     /**
-     * Dibuja el pájaro completo en capas:
-     * cola → ala trasera → cuerpo → panza → ala delantera →
-     * cabeza → ojo → mejilla → pico
-     *
-     * @param b      Estado del pájaro (posición, colores).
-     * @param tiempo Tiempo GLFW para animar el aleteo.
+     * Dibuja el pájaro con rotación y aleteo sincronizado.
      */
-    private void dibujarPajaro(Bird b, float tiempo) {
+    private void dibujarPajaro(Bird b) {
         float x = b.birdX;
         float y = b.birdY;
         float W = BIRD_ANCHO;
         float H = BIRD_ALTO;
 
-        float[] c = b.colorCuerpo; // amarillo o azul
-        float[] pz = b.colorPanza; // tono claro
-        float[] al = b.colorAla; // tono oscuro/acento
-        float[] pk = b.colorPico; // pico naranja
+        float[] c = b.colorCuerpo;
+        float[] pz = b.colorPanza;
+        float[] al = b.colorAla;
+        float[] pk = b.colorPico;
 
-        // Aleteo: seno del tiempo, solo si está vivo
-        float aleteo = (float) Math.sin(tiempo * 8.0f) * H * 0.20f;
+        // ── FISICAS DE ROTACIÓN ──
+        // El ángulo depende directamente de la velocidad (velY)
+        float anguloDestino = b.velY * 0.45f;
+        // Limitamos para evitar que gire demasiado y quede de cabeza
+        estadoAngulo = Math.max(-1.3f, Math.min(0.6f, anguloDestino));
+        estadoPivotX = x; // Centro del pájaro en X
+        estadoPivotY = y; // Centro del pájaro en Y
 
-        // 1. Cola — 3 plumas escalonadas
+        // ── SINCRONIZACIÓN DE ALETEO ──
+        float aleteo;
+        if (b.tiempoAleteo > 0) {
+            // Animación activa (0.25s). Se calcula la onda basada en el progreso del salto.
+            float progreso = 0.25f - b.tiempoAleteo;
+            aleteo = (float) Math.sin(progreso * Math.PI * 8.0f) * H * 0.35f;
+        } else {
+            // Planeo: si está cayendo y no presiona salto, las alas se quedan fijas arriba
+            aleteo = H * 0.20f;
+        }
+
+        // 1. Cola
         dibujarRect(x - W * 0.65f, y + H * 0.18f, W * 0.45f, H * 0.22f, al[0], al[1], al[2]);
         dibujarRect(x - W * 0.70f, y, W * 0.45f, H * 0.22f, al[0] * 0.94f, al[1] * 0.88f, al[2]);
         dibujarRect(x - W * 0.65f, y - H * 0.18f, W * 0.45f, H * 0.22f, al[0] * 0.88f, al[1] * 0.77f, al[2]);
 
-        // 2. Ala trasera (anima hacia abajo)
+        // 2. Ala trasera
         dibujarRect(x - W * 0.15f, y - H * 0.30f + aleteo, W * 0.80f, H * 0.30f, al[0], al[1], al[2]);
 
         // 3. Cuerpo
@@ -573,36 +530,42 @@ public class AppFlappyBird {
         // 4. Panza
         dibujarRect(x + W * 0.10f, y - H * 0.05f, W * 0.55f, H * 0.58f, pz[0], pz[1], pz[2]);
 
-        // 5. Ala delantera (anima hacia arriba con menor amplitud)
+        // 5. Ala delantera
         dibujarRect(x - W * 0.10f, y + H * 0.22f + aleteo * 0.7f, W * 0.70f, H * 0.26f, al[0], al[1], al[2]);
 
         // 6. Cabeza
         dibujarRect(x + W * 0.28f, y + H * 0.42f, W * 0.75f, H * 0.70f, c[0], c[1], c[2]);
 
-        // 7. Ojo — blanco + pupila + brillo
+        // 7. Ojo
         dibujarRect(x + W * 0.42f, y + H * 0.52f, W * 0.28f, H * 0.28f, 1f, 1f, 1f);
         dibujarRect(x + W * 0.48f, y + H * 0.50f, W * 0.15f, H * 0.18f, 0.08f, 0.08f, 0.18f);
         dibujarRect(x + W * 0.46f, y + H * 0.56f, W * 0.07f, H * 0.07f, 1f, 1f, 1f);
 
-        // 8. Mejilla (color de acento suave)
+        // 8. Mejilla
         dibujarRect(x + W * 0.38f, y + H * 0.35f, W * 0.22f, H * 0.14f, 1f, 0.50f, 0.40f);
 
-        // 9. Pico — mandíbula superior + inferior
+        // 9. Pico
         dibujarRect(x + W * 0.72f, y + H * 0.44f, W * 0.38f, H * 0.18f, pk[0], pk[1], pk[2]);
         dibujarRect(x + W * 0.68f, y + H * 0.30f, W * 0.32f, H * 0.13f, pk[0] * 0.90f, pk[1] * 0.85f, pk[2] * 0.80f);
+
+        // RESTAURAR ESTADO DE ROTACIÓN a 0 para que no afecte tuberías ni interfaz
+        estadoAngulo = 0f;
     }
 
     /**
-     * Versión "muerto" del pájaro: sin aleteo, color desaturado/oscuro
-     * y sin mejilla (deja claro visualmente que está eliminado).
+     * Dibuja el pájaro muerto (caída en picada).
      */
-    private void dibujarPajaroMuerto(Bird b, float tiempo) {
+    private void dibujarPajaroMuerto(Bird b) {
         float x = b.birdX;
         float y = b.birdY;
         float W = BIRD_ANCHO;
         float H = BIRD_ALTO;
 
-        // Gris oscuro semi-uniforme para indicar muerte
+        // Picada profunda dramática (casi 90 grados apuntando al suelo)
+        estadoAngulo = -1.5f;
+        estadoPivotX = x;
+        estadoPivotY = y;
+
         float gr = 0.40f;
 
         dibujarRect(x - W * 0.65f, y + H * 0.18f, W * 0.45f, H * 0.22f, gr * 0.8f, gr * 0.8f, gr * 0.8f);
@@ -610,82 +573,100 @@ public class AppFlappyBird {
         dibujarRect(x - W * 0.65f, y - H * 0.18f, W * 0.45f, H * 0.22f, gr * 0.8f, gr * 0.8f, gr * 0.8f);
         dibujarRect(x - W * 0.15f, y - H * 0.30f, W * 0.80f, H * 0.30f, gr * 0.9f, gr * 0.9f, gr * 0.9f);
         dibujarRect(x, y, W, H, gr, gr, gr);
-        dibujarRect(x + W * 0.10f, y - H * 0.05f, W * 0.55f, H * 0.58f, gr + 0.15f, gr + 0.15f, gr + 0.15f);// PANZA
-        // Ala caída (pegada al cuerpo y apuntando hacia abajo)
-        dibujarRect(x - W * 0.05f, y - H * 0.40f, W * 0.70f, H * 0.20f, gr * 0.9f, gr * 0.9f, gr * 0.9f);//ALA
+        dibujarRect(x + W * 0.10f, y - H * 0.05f, W * 0.55f, H * 0.58f, gr + 0.15f, gr + 0.15f, gr + 0.15f);
+        dibujarRect(x - W * 0.05f, y - H * 0.40f, W * 0.70f, H * 0.20f, gr * 0.9f, gr * 0.9f, gr * 0.9f);
         dibujarRect(x + W * 0.28f, y + H * 0.42f, W * 0.75f, H * 0.70f, gr, gr, gr);
 
-        // Ojo de muerto (Cruz / +)
-        // Línea horizontal
         dibujarRect(x + W * 0.42f, y + H * 0.52f, W * 0.28f, H * 0.08f, 0.1f, 0.1f, 0.1f);
-        // Línea vertical (centrada sobre la horizontal)
         dibujarRect(x + W * 0.52f, y + H * 0.45f, W * 0.08f, H * 0.22f, 0.1f, 0.1f, 0.1f);
-        // Pico triste
+
         dibujarRect(x + W * 0.72f, y + H * 0.44f, W * 0.38f, H * 0.18f, 0.55f, 0.25f, 0.05f);
         dibujarRect(x + W * 0.68f, y + H * 0.30f, W * 0.32f, H * 0.13f, 0.50f, 0.22f, 0.04f);
+
+        estadoAngulo = 0f;
     }
 
-    /**
-     * Panel lateral izquierdo con indicadores visuales de puntaje.
-     *
-     * Como no hay renderizado de texto en el framebuffer, el panel
-     * usa rectángulos apilados como "barras de puntaje":
-     * - Barra de color del jugador que crece con cada punto.
-     * - Tope máximo de 20 barras para no salir de pantalla.
-     *
-     * El título de la ventana también muestra los puntajes exactos.
-     */
-    private void dibujarPanelPuntaje() {
-        // Fondo del panel
-        dibujarRect(-0.92f, 0.0f, 0.14f, 2.0f, 0.10f, 0.14f, 0.20f);
-
-        int max = 15; // segmentos máximos visibles
-        float segH = 1.8f / max;
-        float panelX = -0.92f;
-
-        // ── Jugador 1 (izquierda del panel) ───────────────────────────
-        int pts1 = Math.min(bird1.puntaje, max);
-        for (int i = 0; i < pts1; i++) {
-            float sy = -0.9f + i * segH + segH * 0.5f;
-            dibujarRect(panelX - 0.025f, sy, 0.05f, segH * 0.85f,
-                    bird1.colorCuerpo[0], bird1.colorCuerpo[1], bird1.colorCuerpo[2]);
+    private void dibujarNumero(int numero, float cx, float cy, float w, float h, float r, float g, float b) {
+        String numStr = String.valueOf(numero);
+        float espacio = w * 1.8f;
+        float startX = cx - (numStr.length() - 1) * espacio / 2f;
+        for (int i = 0; i < numStr.length(); i++) {
+            int digito = numStr.charAt(i) - '0';
+            dibujarDigito7Segmentos(digito, startX + i * espacio, cy, w, h, r, g, b);
         }
-
-        // ── Jugador 2 (derecha del panel) ─────────────────────────────
-        int pts2 = Math.min(bird2.puntaje, max);
-        for (int i = 0; i < pts2; i++) {
-            float sy = -0.9f + i * segH + segH * 0.5f;
-            dibujarRect(panelX + 0.025f, sy, 0.05f, segH * 0.85f,
-                    bird2.colorCuerpo[0], bird2.colorCuerpo[1], bird2.colorCuerpo[2]);
-        }
-
-        // Divisor central del panel
-        dibujarRect(panelX, 0.0f, 0.004f, 1.9f, 0.55f, 0.65f, 0.70f);
-
-        // Indicador de estado: punto brillante si está vivo, oscuro si muerto
-        float yIndicador = 0.95f;
-        // P1
-        float[] c1 = bird1.alive
-                ? new float[] { bird1.colorCuerpo[0], bird1.colorCuerpo[1], bird1.colorCuerpo[2] }
-                : new float[] { 0.3f, 0.3f, 0.3f };
-        dibujarRect(panelX - 0.025f, yIndicador, 0.06f, 0.06f, c1[0], c1[1], c1[2]);
-        // P2
-        float[] c2 = bird2.alive
-                ? new float[] { bird2.colorCuerpo[0], bird2.colorCuerpo[1], bird2.colorCuerpo[2] }
-                : new float[] { 0.3f, 0.3f, 0.3f };
-        dibujarRect(panelX + 0.025f, yIndicador, 0.06f, 0.06f, c2[0], c2[1], c2[2]);
     }
 
-    // ── Helper de dibujo ───────────────────────────────────────────────
+    private void dibujarDigito7Segmentos(int digito, float cx, float cy, float w, float h, float r, float g, float b) {
+        float t = 0.025f;
+        float w2 = w / 2f;
+        float h2 = h / 2f;
+
+        int[][] segmentos = {
+                { 0, 1, 2, 3, 4, 5 }, { 1, 2 }, { 0, 1, 6, 4, 3 }, { 0, 1, 6, 2, 3 }, { 5, 6, 1, 2 },
+                { 0, 5, 6, 2, 3 }, { 0, 5, 6, 4, 2, 3 }, { 0, 1, 2 }, { 0, 1, 2, 3, 4, 5, 6 }, { 0, 1, 2, 3, 5, 6 }
+        };
+
+        if (digito < 0 || digito > 9)
+            return;
+
+        for (int seg : segmentos[digito]) {
+            switch (seg) {
+                case 0:
+                    dibujarRect(cx, cy + h2, w + t, t, r, g, b);
+                    break;
+                case 1:
+                    dibujarRect(cx + w2, cy + h2 / 2, t, h2, r, g, b);
+                    break;
+                case 2:
+                    dibujarRect(cx + w2, cy - h2 / 2, t, h2, r, g, b);
+                    break;
+                case 3:
+                    dibujarRect(cx, cy - h2, w + t, t, r, g, b);
+                    break;
+                case 4:
+                    dibujarRect(cx - w2, cy - h2 / 2, t, h2, r, g, b);
+                    break;
+                case 5:
+                    dibujarRect(cx - w2, cy + h2 / 2, t, h2, r, g, b);
+                    break;
+                case 6:
+                    dibujarRect(cx, cy, w + t, t, r, g, b);
+                    break;
+            }
+        }
+    }
+
+    private void dibujarInterfazSuperior() {
+        dibujarRect(0.0f, 0.88f, 2.0f, 0.24f, 0.15f, 0.18f, 0.22f);
+        dibujarRect(0.0f, 0.76f, 2.0f, 0.015f, 0.3f, 0.35f, 0.4f);
+
+        float[] c1 = bird1.alive ? bird1.colorCuerpo : new float[] { 0.3f, 0.3f, 0.3f };
+        dibujarRect(-0.85f, 0.88f, 0.08f, 0.08f, c1[0], c1[1], c1[2]);
+        dibujarNumero(bird1.puntaje, -0.65f, 0.88f, 0.05f, 0.09f, 1f, 1f, 1f);
+
+        dibujarRect(0.0f, 0.94f, 0.12f, 0.015f, 1.0f, 0.8f, 0.1f);
+        dibujarRect(0.0f, 0.81f, 0.12f, 0.015f, 1.0f, 0.8f, 0.1f);
+        dibujarNumero(calcularNivel(), 0.0f, 0.875f, 0.04f, 0.07f, 1.0f, 0.8f, 0.1f);
+
+        dibujarNumero(bird2.puntaje, 0.65f, 0.88f, 0.05f, 0.09f, 1f, 1f, 1f);
+        float[] c2 = bird2.alive ? bird2.colorCuerpo : new float[] { 0.3f, 0.3f, 0.3f };
+        dibujarRect(0.85f, 0.88f, 0.08f, 0.08f, c2[0], c2[1], c2[2]);
+    }
+
+    // ── Helper de dibujo (Ahora pasa Ángulo y Pivote) ──────────────────
     private void dibujarRect(float x, float y, float ancho, float alto,
             float r, float g, float b) {
         GL20.glUniform2f(uOffsetLocation, x, y);
         GL20.glUniform2f(uScaleLocation, ancho, alto);
         GL20.glUniform3f(uColorLocation, r, g, b);
+
+        // Variables de estado de rotación (si son 0, se dibuja normal)
+        GL20.glUniform1f(uAngleLocation, estadoAngulo);
+        GL20.glUniform2f(uPivotLocation, estadoPivotX, estadoPivotY);
+
         GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 6);
     }
 
-    // ── Título de ventana ──────────────────────────────────────────────
     private void actualizarTitulo() {
         int nivelActual = calcularNivel();
         String p1 = bird1.nombre + ": " + bird1.puntaje + (bird1.alive ? "" : " ✗");
@@ -700,14 +681,11 @@ public class AppFlappyBird {
             GLFW.glfwSetWindowTitle(window, base);
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Bucle principal
-    // ══════════════════════════════════════════════════════════════════
     private void loop() {
         float ultimoTiempo = (float) GLFW.glfwGetTime();
         while (!GLFW.glfwWindowShouldClose(window)) {
             float ahora = (float) GLFW.glfwGetTime();
-            float dt = Math.min(ahora - ultimoTiempo, 0.033f); // cap 30 ms
+            float dt = Math.min(ahora - ultimoTiempo, 0.033f);
             ultimoTiempo = ahora;
 
             procesarInput();
@@ -719,7 +697,6 @@ public class AppFlappyBird {
         }
     }
 
-    // ── Liberación de recursos ─────────────────────────────────────────
     private void cleanup() {
         GL30.glDeleteVertexArrays(vao);
         GL15.glDeleteBuffers(vbo);
