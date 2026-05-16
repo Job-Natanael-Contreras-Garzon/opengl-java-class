@@ -89,7 +89,7 @@ public class AppFlappyBird {
         // Crear la ventana
         window = GLFW.glfwCreateWindow(
                 Constants.ANCHO, Constants.ALTO,
-                "Flappy Bird 2P", 0, 0);
+                "Flappy Bird 3P", 0, 0);
         if (window == 0)
             throw new RuntimeException("No se pudo crear la ventana");
 
@@ -145,10 +145,15 @@ public class AppFlappyBird {
         // Detecta si W o ARRIBA fueron presionadas
         boolean wAhora = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_W) == GLFW.GLFW_PRESS;
         boolean upAhora = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_UP) == GLFW.GLFW_PRESS;
-        if ((wAhora && !prevW) || (upAhora && !prevUp)) {  // Flanco de W o UP
+        if ((wAhora && !prevW) ) {  // Flanco de W o UP
             if (world.gameOver)
                 world.reset();
             world.saltarP2();
+        }
+        if ( (upAhora && !prevUp)) {  // Flanco de W o UP
+            if (world.gameOver)
+                world.reset();
+            world.saltarP3();
         }
         prevW = wAhora;
         prevUp = upAhora;
@@ -237,18 +242,21 @@ public class AppFlappyBird {
         // Información de P2
         String p2 = world.bird2.nombre + ":" + world.bird2.puntaje
                 + (world.bird2.alive ? "" : " ✗");
+        // Informacion de P3
+        String p3 = world.bird3.nombre + ":" + world.bird3.puntaje
+                    + (world.bird3.alive ? "" : " ✗");
         
         // Información de nivel y velocidad actual
         String nivel = "Nv." + world.calcularNivel()
                 + " [vel:" + String.format("%.2f", world.velocidadActual()) + "]";
         
         // Construir título base
-        String base = "Flappy Bird 2P  |  " + p1 + "   " + p2 + "  |  " + nivel;
+        String base = "Flappy Bird 2P  |  " + p1 + "   " + p2 + "  " + p3 + "  |  " + nivel;
 
         // Añadir mensaje contextual según estado
         if (!world.started)
             // En pantalla de inicio
-            GLFW.glfwSetWindowTitle(window, base + "  |  SPACE / W para empezar");
+            GLFW.glfwSetWindowTitle(window, base + "  |  SPACE / W / ARRIBA para empezar");
         else if (world.gameOver)
             // En pantalla de game over
             GLFW.glfwSetWindowTitle(window, base + "  |  GAME OVER — SPACE/W/R para reiniciar");

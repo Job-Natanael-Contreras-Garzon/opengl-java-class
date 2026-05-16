@@ -326,10 +326,15 @@ public class Renderer {
          dibujarPajaroMuerto(world.bird1, world.getFlickerTimer1(), tiempo);
       if (!world.bird2.alive)
          dibujarPajaroMuerto(world.bird2, world.getFlickerTimer2(), tiempo);
+      if (!world.bird3.alive)
+         dibujarPajaroMuerto(world.bird3, world.getflickerTimer3(), tiempo);
       if (world.bird1.alive)
          dibujarPajaro(world.bird1, tiempo);
       if (world.bird2.alive)
          dibujarPajaro(world.bird2, tiempo);
+      if (world.bird3.alive)
+         dibujarPajaro(world.bird3, tiempo);
+
 
       // Capa 10: HUD superior (franja oscura con puntajes y nivel)
       dibujarHUD(world, tiempo);

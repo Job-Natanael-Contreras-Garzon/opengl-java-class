@@ -22,7 +22,7 @@ public class Tuberia {
    // ── Control de puntuación ────────────────────────────────────────────
    public boolean puntuada1;       // true = pájaro P1 ya pasó y anotó punto
    public boolean puntuada2;       // true = pájaro P2 ya pasó y anotó punto
-
+   public boolean puntuada3;       // true = pájaro P3 ya pasó y anotó punto
    /**
     * Constructor: crea una tubería en una posición X con un hueco aleatorio.
     * 

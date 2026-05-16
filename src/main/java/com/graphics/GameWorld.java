@@ -22,9 +22,10 @@ import java.util.Random;
  * - AppFlappyBird es el "controlador" (input → GameWorld).
  *
  * Ciclo de uso:
+ * 
  * <pre>
- * world.init();         // Una sola vez al arrancar
- * world.reset();        // Cada nueva partida
+ * world.init(); // Una sola vez al arrancar
+ * world.reset(); // Cada nueva partida
  * world.actualizar(dt); // Cada frame (~0.016 a 0.033 segundos)
  * </pre>
  */
@@ -33,40 +34,40 @@ public class GameWorld {
    // ════════════════════════════════════════════════════════════════════════
    // ESTADO PÚBLICO (leído por Renderer para dibujar)
    // ════════════════════════════════════════════════════════════════════════
-   
-   public Bird bird1, bird2;                      // Los dos pájaros jugadores
-   public final List<Tuberia> tuberias = new ArrayList<>();  // Obstáculos activos
 
-   public boolean started;                        // true = partida comenzó (primer salto)
-   public boolean gameOver;                       // true = ambos pájaros muertos
-   public int maxPuntajeGlobal;                   // Máximo puntaje histórico (para nivel)
+   public Bird bird1, bird2, bird3; // Los dos pájaros jugadores --anadiendo tercer pajaro
+   public final List<Tuberia> tuberias = new ArrayList<>(); // Obstáculos activos
+
+   public boolean started; // true = partida comenzó (primer salto)
+   public boolean gameOver; // true = ambos pájaros muertos
+   public int maxPuntajeGlobal; // Máximo puntaje histórico (para nivel)
 
    // ── Parallax para capas visuales (Renderer desplaza fondos según estos) ──
-   public float parallaxSuelo = 0f;               // Offset del suelo (se mueve rápido)
-   public float parallaxMontanas = 0f;            // Offset de montañas cercanas
-   public float parallaxNubes = 0f;               // Offset de nubes (se mueve lento)
+   public float parallaxSuelo = 0f; // Offset del suelo (se mueve rápido)
+   public float parallaxMontanas = 0f; // Offset de montañas cercanas
+   public float parallaxNubes = 0f; // Offset de nubes (se mueve lento)
 
    // ════════════════════════════════════════════════════════════════════════
    // SUBSISTEMAS
    // ════════════════════════════════════════════════════════════════════════
-   
-   public final ParticleSystem particulas = new ParticleSystem();  // Explosiones al morir
-   private final SoundManager sonido = new SoundManager();         // Audio sint​éetico
+
+   public final ParticleSystem particulas = new ParticleSystem(); // Explosiones al morir
+   private final SoundManager sonido = new SoundManager(); // Audio sint​éetico
 
    // ════════════════════════════════════════════════════════════════════════
    // ESTADO PRIVADO (lógica interna del mundo)
    // ════════════════════════════════════════════════════════════════════════
-   
-   private float timerSpawn;                      // Contador para spawning de tuberías
-   private float flickerTimer1 = 0f;              // Parpadeo del pájaro P1 al morir
-   private float flickerTimer2 = 0f;              // Parpadeo del pájaro P2 al morir
-   private final Random random = new Random();    // Generador de números aleatorios
 
+   private float timerSpawn; // Contador para spawning de tuberías
+   private float flickerTimer1 = 0f; // Parpadeo del pájaro P1 al morir
+   private float flickerTimer2 = 0f; // Parpadeo del pájaro P2 al morir
+   private float flickerTimer3 = 0f; // Parpadeo del pájaro P3 al morir
+   private final Random random = new Random(); // Generador de números aleatorios
 
    // ════════════════════════════════════════════════════════════════════════
    // API: FLICKER (parpadeo)
    // ════════════════════════════════════════════════════════════════════════
-   
+
    // Exponer timers de parpadeo al Renderer (solo lectura)
    public float getFlickerTimer1() {
       return flickerTimer1;
@@ -74,6 +75,10 @@ public class GameWorld {
 
    public float getFlickerTimer2() {
       return flickerTimer2;
+   }
+
+   public float getflickerTimer3() {
+      return flickerTimer3;
    }
 
    // ════════════════════════════════════════════════════════════════════════
@@ -96,8 +101,8 @@ public class GameWorld {
             new float[] { 0.99f, 0.94f, 0.55f }, // Panza: amarillo claro
             new float[] { 0.90f, 0.55f, 0.05f }, // Ala: naranja
             new float[] { 1.00f, 0.42f, 0.10f }, // Pico: naranja-rojo
-            "P1");  // Identificador
-      
+            "P1"); // Identificador
+
       // ── Pájaro 2: Azul + Azul Oscuro ───────────────────────────────────
       bird2 = new Bird(
             Constants.BIRD2_X,
@@ -105,9 +110,15 @@ public class GameWorld {
             new float[] { 0.70f, 0.90f, 1.00f }, // Panza: azul claro (cyan)
             new float[] { 0.05f, 0.40f, 0.80f }, // Ala: azul oscuro
             new float[] { 1.00f, 0.42f, 0.10f }, // Pico: naranja-rojo (igual)
-            "P2");  // Identificador
-      
-      reset();  // Inicializar estado de juego
+            "P2"); // Identificador
+      bird3 = new Bird(
+            Constants.BIRD3_X,
+            new float[] { 0.20f, 0.80f, 0.30f }, // Cuerpo: verde
+            new float[] { 0.50f, 0.95f, 0.60f }, // Panza: verde claro
+            new float[] { 0.10f, 0.50f, 0.20f }, // Ala: verde oscuro
+            new float[] { 1.00f, 0.42f, 0.10f }, // Pico: naranja-rojo (igual)
+            "P3"); // Identificador
+      reset(); // Inicializar estado de juego
    }
 
    /**
@@ -121,16 +132,18 @@ public class GameWorld {
     * - Estado de juego (started=false, gameOver=false)
     */
    public void reset() {
-      bird1.reset();                 // Vuelve a posición inicial
-      bird2.reset();                 // Vuelve a posición inicial
-      tuberias.clear();              // Borra obstáculos
-      particulas.clear();            // Borra explosiones
-      timerSpawn = 0f;               // Reinicia contador de spawn
-      started = false;               // Partida no comenzada
-      gameOver = false;              // No es game over
-      flickerTimer1 = 0f;            // Sin parpadeo
-      flickerTimer2 = 0f;            // Sin parpadeo
-      parallaxSuelo = 0f;            // Reset parallax
+      bird1.reset(); // Vuelve a posición inicial
+      bird2.reset(); // Vuelve a posición inicial
+      bird3.reset(); // Vuelve a posición inicial
+      tuberias.clear(); // Borra obstáculos
+      particulas.clear(); // Borra explosiones
+      timerSpawn = 0f; // Reinicia contador de spawn
+      started = false; // Partida no comenzada
+      gameOver = false; // No es game over
+      flickerTimer1 = 0f; // Sin parpadeo
+      flickerTimer2 = 0f; // Sin parpadeo
+      flickerTimer3 = 0f; // Sin parpadeo
+      parallaxSuelo = 0f; // Reset parallax
       parallaxMontanas = 0f;
       parallaxNubes = 0f;
    }
@@ -152,11 +165,11 @@ public class GameWorld {
     */
    public void saltarP1() {
       if (!bird1.alive)
-         return;  // Pájaro muerto no puede saltar
-      started = true;               // Primera acción: comienza el juego
-      bird1.velY = Constants.IMPULSO_SALTO;  // Impulso hacia arriba
-      bird1.tiempoAleteo = 0.25f;   // Animar las alas durante 0.25 seg
-      sonido.playJump();            // Sonido de salto
+         return; // Pájaro muerto no puede saltar
+      started = true; // Primera acción: comienza el juego
+      bird1.velY = Constants.IMPULSO_SALTO; // Impulso hacia arriba
+      bird1.tiempoAleteo = 0.25f; // Animar las alas durante 0.25 seg
+      sonido.playJump(); // Sonido de salto
    }
 
    /**
@@ -173,6 +186,20 @@ public class GameWorld {
       sonido.playJump();
    }
 
+   /**
+    * Hace que P3 salte.
+    * Ejecutado cuando el usuario presiona W o ARRIBA.
+    * Idéntico a saltarP1() pero para el pájaro 2.
+    */
+   public void saltarP3() {
+      if (!bird3.alive)
+         return;
+      started = true;
+      bird3.velY = Constants.IMPULSO_SALTO;
+      bird3.tiempoAleteo = 0.25f;
+      sonido.playJump();
+   }
+
    // ════════════════════════════════════════════════════════════════════════
    // DIFICULTAD (progresión según puntaje)
    // ════════════════════════════════════════════════════════════════════════
@@ -184,8 +211,8 @@ public class GameWorld {
     * Fórmula: nivel = 1 + (maxPuntajeGlobal / PUNTOS_POR_NIVEL)
     * 
     * Ejemplos:
-    * - maxPuntaje = 0-4  → nivel 1
-    * - maxPuntaje = 5-9  → nivel 2
+    * - maxPuntaje = 0-4 → nivel 1
+    * - maxPuntaje = 5-9 → nivel 2
     * - maxPuntaje = 10-14 → nivel 3
     */
    public int calcularNivel() {
@@ -208,7 +235,8 @@ public class GameWorld {
 
    /**
     * Calcula tiempo entre spawns de tuberías según el nivel.
-    * Disminuye {@link Constants#DECREMENTO_TIEMPO} por cada nivel (más frecuentes).
+    * Disminuye {@link Constants#DECREMENTO_TIEMPO} por cada nivel (más
+    * frecuentes).
     * Piso en {@link Constants#TIEMPO_MIN} para no ser imposible.
     * 
     * Fórmula: tiempo = TIEMPO_BASE - (nivel-1) * DECREMENTO_TIEMPO
@@ -235,9 +263,9 @@ public class GameWorld {
     * 4. Actualizar partículas
     * 5. Actualizar timers de parpadeo
     * 6. Si no gameOver:
-    *    - Spawnear tuberías
-    *    - Mover tuberías y chequear puntuación
-    *    - Detectar colisiones
+    * - Spawnear tuberías
+    * - Mover tuberías y chequear puntuación
+    * - Detectar colisiones
     * 7. Si ambos muertos: game over
     *
     * @param dt Delta time en segundos (capeado externamente a 0.033 s)
@@ -254,27 +282,38 @@ public class GameWorld {
       if (!gameOver) {
          // Suelo se mueve rápido (parallax factor 0.90 = 90% de la velocidad)
          parallaxSuelo = (parallaxSuelo - vel * dt * Constants.PARALLAX_SUELO) % 1.0f;
-         
+
          // Montañas cercanas se mueven a velocidad media
          parallaxMontanas = (parallaxMontanas - vel * dt * Constants.PARALLAX_MONTANAS_CERCA) % 2.0f;
-         
+
          // Nubes se mueven muy lentamente (parallax factor 0.05 = 5%)
          parallaxNubes = (parallaxNubes - vel * dt * Constants.PARALLAX_NUBES) % 2.0f;
       }
 
       // ── Física de pájaros ────────────────────────────────────────────────
-      actualizarBird(bird1, dt, vel, 1);  // P1 con id=1
-      actualizarBird(bird2, dt, vel, 2);  // P2 con id=2
+      actualizarBird(bird1, dt, vel, 1); // P1 con id=1
+      actualizarBird(bird2, dt, vel, 2); // P2 con id=2
+      actualizarBird(bird3, dt, vel, 3); // P3 con id=3
 
       // ── Actualizar partículas (caída por gravedad, desvanecimiento) ─────
       particulas.actualizar(dt);
 
       // ── Actualizar timers de parpadeo (flicker) ──────────────────────────
-      // Cuentan regresivamente hacia 0 (cuando llegan a 0, el pájaro dejan de parpadear)
+      // Cuentan regresivamente hacia 0 (cuando llegan a 0, el pájaro dejan de
+      // parpadear)
       if (flickerTimer1 > 0)
          flickerTimer1 = Math.max(0, flickerTimer1 - dt);
       if (flickerTimer2 > 0)
          flickerTimer2 = Math.max(0, flickerTimer2 - dt);
+      if (flickerTimer3 > 0)
+         flickerTimer3 = Math.max(0, flickerTimer3 - dt);
+
+      // Verificar si algun pájaro ha alcanzado el puntaje máximo
+      if (bird1.puntaje >= Constants.Puntaje_Maximo ||
+            bird2.puntaje >= Constants.Puntaje_Maximo ||
+            bird3.puntaje >= Constants.Puntaje_Maximo) {
+         gameOver = true;
+      }
 
       // Si ya es game over, no continuar con lógica de juego
       if (gameOver)
@@ -283,12 +322,12 @@ public class GameWorld {
       // ── Spawnear tuberías con dificultad progresiva ───────────────────────
       timerSpawn += dt;
       if (timerSpawn >= tiempoSpawnActual()) {
-         timerSpawn = 0f;  // Reiniciar contador
-         
+         timerSpawn = 0f; // Reiniciar contador
+
          // Generación de altura aleatoria del gap (hueco)
          float gap = Constants.GAP_MIN_CENTRO
                + random.nextFloat() * (Constants.GAP_MAX_CENTRO - Constants.GAP_MIN_CENTRO);
-         
+
          // Crear tubería en el lado derecho de la pantalla
          tuberias.add(new Tuberia(1.2f, gap));
       }
@@ -297,21 +336,22 @@ public class GameWorld {
       Iterator<Tuberia> it = tuberias.iterator();
       while (it.hasNext()) {
          Tuberia t = it.next();
-         t.x -= vel * dt;  // Mover tubería hacia la izquierda
-         
+         t.x -= vel * dt; // Mover tubería hacia la izquierda
+
          // Chequear si P1 y P2 puntúan al pasar esta tubería
-         puntarSiCorresponde(t, bird1, true);   // true = es P1
-         puntarSiCorresponde(t, bird2, false);  // false = es P2
-         
+         puntarSiCorresponde(t, bird1, true); // true = es P1
+         puntarSiCorresponde(t, bird2, false); // false = es P2
+         puntarSiCorresponde(t, bird3, false); // false = es P3
+
          // Eliminar tuberías que salieron de pantalla (a la izquierda)
          if (t.x + Constants.TUBERIA_ANCHO * 0.5f < -1.3f)
             it.remove();
       }
 
       // ── Chequear fin del juego ──────────────────────────────────────────
-      if (!bird1.alive && !bird2.alive) {
-         gameOver = true;  // Ambos pájaros muertos = fin
-         sonido.playGameOver();  // Sonido final
+      if (!bird1.alive && !bird2.alive && !bird3.alive) {
+         gameOver = true; // Todos los pájaros muertos = fin
+         sonido.playGameOver(); // Sonido final
       }
    }
 
@@ -325,17 +365,17 @@ public class GameWorld {
     * Pasos:
     * 1. Si está muerto: cae libremente (animación post-mortem)
     * 2. Si está vivo:
-    *    a. Aplicar gravedad: velY += GRAVEDAD * dt
-    *    b. Limitar velocidad máxima de caída (no caer infinitamente rápido)
-    *    c. Integrar posición: birdY += velY * dt
-    *    d. Actualizar timer de aleteo
-    *    e. Chequear colisiones con límites de pantalla (techo/suelo)
-    *    f. Chequear colisiones con tuberías
+    * a. Aplicar gravedad: velY += GRAVEDAD * dt
+    * b. Limitar velocidad máxima de caída (no caer infinitamente rápido)
+    * c. Integrar posición: birdY += velY * dt
+    * d. Actualizar timer de aleteo
+    * e. Chequear colisiones con límites de pantalla (techo/suelo)
+    * f. Chequear colisiones con tuberías
     *
-    * @param b    Pájaro a actualizar
-    * @param dt   Delta time
-    * @param vel  Velocidad actual de tuberías (para contexto)
-    * @param id   Identificador (1 = bird1, 2 = bird2) para flickering
+    * @param b   Pájaro a actualizar
+    * @param dt  Delta time
+    * @param vel Velocidad actual de tuberías (para contexto)
+    * @param id  Identificador (1 = bird1, 2 = bird2) para flickering
     */
    private void actualizarBird(Bird b, float dt, float vel, int id) {
       // ── Pájaro muerto: cae libremente ────────────────────────────────────
@@ -343,19 +383,19 @@ public class GameWorld {
          // Gravedad amplificada (1.5x) para caída más rápida post-mortem
          b.velY += Constants.GRAVEDAD * dt * 1.5f;
          b.birdY += b.velY * dt;
-         return;  // Nada más que hacer
+         return; // Nada más que hacer
       }
 
       // ── Pájaro vivo: física normal ───────────────────────────────────────
-      
+
       // Aplicar gravedad (acelera hacia abajo)
       b.velY += Constants.GRAVEDAD * dt;
-      
+
       // Limitar velocidad máxima de caída (terminal velocity)
       // Sin esto, el pájaro cae muy rápido si está mucho tiempo sin saltar
       if (b.velY < Constants.VELOCIDAD_MAX_CAIDA)
          b.velY = Constants.VELOCIDAD_MAX_CAIDA;
-      
+
       // Integrar velocidad → posición
       b.birdY += b.velY * dt;
 
@@ -366,20 +406,20 @@ public class GameWorld {
 
       // ── Colisión con límites de pantalla ─────────────────────────────────
       // Pájaro tiene tamaño BIRD_ALTO × BIRD_ANCHO
-      float top = b.birdY + Constants.BIRD_ALTO * 0.5f;      // Borde superior del pájaro
-      float bottom = b.birdY - Constants.BIRD_ALTO * 0.5f;   // Borde inferior del pájaro
-      
+      float top = b.birdY + Constants.BIRD_ALTO * 0.5f; // Borde superior del pájaro
+      float bottom = b.birdY - Constants.BIRD_ALTO * 0.5f; // Borde inferior del pájaro
+
       // Si toca techo o suelo → muere
       if (top >= Constants.LIMITE_TECHO || bottom <= Constants.LIMITE_SUELO) {
          matarBird(b, id);
-         return;  // No chequear más colisiones (ya está muerto)
+         return; // No chequear más colisiones (ya está muerto)
       }
 
       // ── Colisión con tuberías ───────────────────────────────────────────
       for (Tuberia t : tuberias) {
          if (colisionaConTuberia(b, t)) {
             matarBird(b, id);
-            return;  // Ya está muerto
+            return; // Ya está muerto
          }
       }
    }
@@ -397,10 +437,10 @@ public class GameWorld {
     */
    private void matarBird(Bird b, int id) {
       b.alive = false;
-      b.velY = 0.2f;  // Pequeño impulso hacia arriba al morir (rebote visual)
+      b.velY = 0.2f; // Pequeño impulso hacia arriba al morir (rebote visual)
 
       // Emitir partículas del color del pájaro (su cuerpo)
-      float[] c = b.colorCuerpo;  // Obtener color del cuerpo
+      float[] c = b.colorCuerpo; // Obtener color del cuerpo
       particulas.emitirMuerte(b.birdX, b.birdY, c[0], c[1], c[2]);
 
       // Iniciar parpadeo (flicker) — el pájaro muerto parpadeará 1 segundo
@@ -421,29 +461,31 @@ public class GameWorld {
     * - Actualizar máximo puntaje global (para calcular nivel)
     * - Reproducir sonido de punto
     *
-    * @param t   Tubería a chequear
-    * @param b   Pájaro
+    * @param t    Tubería a chequear
+    * @param b    Pájaro
     * @param esP1 true si es P1, false si es P2
     */
    private void puntarSiCorresponde(Tuberia t, Bird b, boolean esP1) {
       // Si el pájaro está muerto, no puede anotar
       if (!b.alive)
          return;
-      
+
       // Obtener flag de si esta tubería ya fue puntuada por este pájaro
-      boolean yaContada = esP1 ? t.puntuada1 : t.puntuada2;
+      boolean yaContada = esP1 ? t.puntuada1 : t.puntuada2 ;
       if (!yaContada && t.x + Constants.TUBERIA_ANCHO * 0.5f < b.birdX) {
          // Marcar como puntuada
          if (esP1)
             t.puntuada1 = true;
-         else
+         else if (!esP1 && bird3 != null)
             t.puntuada2 = true;
-         
+         else
+            t.puntuada3 = true;
+
          // Incrementar puntaje
          b.puntaje++;
 
          // Actualizar máximo puntaje global (para calcular nivel)
-         int maxActual = Math.max(bird1.puntaje, bird2.puntaje);
+         int maxActual = Math.max(Math.max(bird1.puntaje, bird2.puntaje),bird3.puntaje);
          if (maxActual > maxPuntajeGlobal)
             maxPuntajeGlobal = maxActual;
 
@@ -460,8 +502,8 @@ public class GameWorld {
     * 2. Obtener bounding box de la tubería
     * 3. Si no solapan en X → no hay colisión
     * 4. Si solapan en X:
-    *    - Si el pájaro está en el gap (hueco) → sin colisión
-    *    - Si toca tubería superior o inferior → colisión
+    * - Si el pájaro está en el gap (hueco) → sin colisión
+    * - Si toca tubería superior o inferior → colisión
     *
     * @param b Pájaro a chequear
     * @param t Tubería
@@ -469,23 +511,23 @@ public class GameWorld {
     */
    private boolean colisionaConTuberia(Bird b, Tuberia t) {
       // Bounding box del pájaro
-      float bL = b.birdX - Constants.BIRD_ANCHO * 0.5f;    // Izquierda
-      float bR = b.birdX + Constants.BIRD_ANCHO * 0.5f;    // Derecha
-      float bB = b.birdY - Constants.BIRD_ALTO * 0.5f;     // Abajo
-      float bT = b.birdY + Constants.BIRD_ALTO * 0.5f;     // Arriba
-      
+      float bL = b.birdX - Constants.BIRD_ANCHO * 0.5f; // Izquierda
+      float bR = b.birdX + Constants.BIRD_ANCHO * 0.5f; // Derecha
+      float bB = b.birdY - Constants.BIRD_ALTO * 0.5f; // Abajo
+      float bT = b.birdY + Constants.BIRD_ALTO * 0.5f; // Arriba
+
       // Bounding box de la tubería
-      float pL = t.x - Constants.TUBERIA_ANCHO * 0.5f;     // Izquierda
-      float pR = t.x + Constants.TUBERIA_ANCHO * 0.5f;     // Derecha
+      float pL = t.x - Constants.TUBERIA_ANCHO * 0.5f; // Izquierda
+      float pR = t.x + Constants.TUBERIA_ANCHO * 0.5f; // Derecha
 
       // Chequeo en eje X: si no solapan en X, no hay colisión
       if (bR <= pL || bL >= pR)
          return false;
 
       // Solapan en X, ahora chequear gap (hueco de paso)
-      float gT = t.gapCentroY + Constants.GAP_ALTO * 0.5f;  // Techo del gap
-      float gB = t.gapCentroY - Constants.GAP_ALTO * 0.5f;  // Piso del gap
-      
+      float gT = t.gapCentroY + Constants.GAP_ALTO * 0.5f; // Techo del gap
+      float gB = t.gapCentroY - Constants.GAP_ALTO * 0.5f; // Piso del gap
+
       // Si el pájaro está completamente dentro del gap, sin colisión
       // Si toca tubería superior o inferior → colisión
       return bT > gT || bB < gB;
@@ -500,6 +542,6 @@ public class GameWorld {
     * Llamado en AppFlappyBird.cleanup() antes de terminar.
     */
    public void shutdown() {
-      sonido.shutdown();  // Cerrar pool de audio
+      sonido.shutdown(); // Cerrar pool de audio
    }
 }
